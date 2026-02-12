@@ -19,7 +19,10 @@ class CannonLayer(nn.Module):
     def __init__(self, input_dim, hidden_dim, kernel_size=7):
         super(CannonLayer, self).__init__()
         self.kernel_size = kernel_size
-        assert kernel_size % 2 == 1, "Kernel size must be odd -- for padding"
+        assert kernel_size % 2 == 1, "Kernel size must be odd -- for padding so subtracting 1"
+        if kernel_size % 2 == 1:
+            self.kernel_size -= 1
+
         self.cannon_layer = nn.Conv1d(
             input_dim,
             hidden_dim,
@@ -43,14 +46,17 @@ class MLP_cannon(nn.Module):
         self.down_cannon = CannonLayer(intermediate_dim, hidden_dim, kernel_size=kernel_size)
 
     def forward(self, x):
+        cannon = self.up_cannon(x)
         x = F.relu(self.gate_proj(x)) * self.up_proj(x)
-        x = self.up_cannon(x)
+        x = x + cannon
+        cannon = self.down_cannon(x)
         x = self.down_proj(x)
-        x = self.down_cannon(x)
+        x = x + cannon
+        
         return x
 
 if __name__ == "__main__":
     input = torch.randn(32, 20, 16)
-    model = MLP_cannon(hidden_dim=16, intermediate_dim=16, kernel_size=7)
+    model = MLP_cannon(hidden_dim=16, intermediate_dim=16*2, kernel_size=7)
     output = model(input)
     print(output.shape)
