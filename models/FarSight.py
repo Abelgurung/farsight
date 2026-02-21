@@ -39,7 +39,14 @@ class CannonExpand(nn.Module):
 
     def forward(self, input):
         # input: [batch, seq, channels] -> [batch, seq * kernel_size, channels]
-        return input.repeat_interleave(self.kernel_size, dim=1)
+        # Pad the leftmost token to shift the sequence right, then drop the last token
+        # Fast shift-right on GPU: allocate once and do two slice copies.
+        output = input.new_empty(input.shape)
+        output[:, :1, :] = input[:, :1, :]      # keep leftmost token
+        output[:, 1:, :] = input[:, :-1, :]     # shift right by 1
+        output = output.repeat_interleave(self.kernel_size, dim=1)
+        
+        return output
 
 
 class CoarseAttention(nn.Module):
@@ -66,12 +73,15 @@ class CoarseAttention(nn.Module):
 
         attn = F.scaled_dot_product_attention(q, k, v)  # [batch, heads, seq, head_dim]
         attn = attn.transpose(1, 2).contiguous().view(batch_size, seq_len, hidden_dim)  # [batch, seq, hidden_dim]
-        attn = self.expand(attn)    
+        attn = self.expand(attn)
         return self.W_o(attn)
 
 if __name__ == "__main__":
+
+    #things to do:
+    # we need to maket the expander aware of the padding so that it doesn't expand the padding tokens
     batch_size = 10
-    seq_len = 10
+    seq_len = 14
     hidden_dim = 16
     input = torch.randn(batch_size, seq_len, hidden_dim)
     print(f"input shape: {input.shape}")
@@ -80,7 +90,7 @@ if __name__ == "__main__":
     output = farsight(input)
     print(f"cannon merge shape: {output.shape}")
     expander = CannonExpand(kernel_size=kernel_size)
-    expanded = expander(input)
+    expanded = expander(output)
     print(f"expanded shape: {expanded.shape}")
     coarse_attention = CoarseAttention(input_dim=hidden_dim, hidden_dim=hidden_dim, kernel_size=kernel_size)
     output = coarse_attention(input)
